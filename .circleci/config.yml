@@ -1,234 +1,41 @@
-version: 2
+version: 2.1
+
+orbs:
+  # The python orb contains a set of prepackaged CircleCI configuration you can use repeatedly in your configuration files
+  # Orb commands and jobs help you with common scripting around a language/tool
+  # so you dont have to copy and paste it everywhere.
+  # See the orb documentation here: https://circleci.com/developer/orbs/orb/circleci/python
+  python: circleci/python@1.2
+
+workflows:
+  sample:  # This is the name of the workflow, feel free to change it to better match your workflow.
+    # Inside the workflow, you define the jobs you want to run. 
+    # For more details on extending your workflow, see the configuration docs: https://circleci.com/docs/2.0/configuration-reference/#workflows 
+    jobs:
+      - build-and-test
+
+
 jobs:
-  build:
+  build-and-test:  # This is the name of the job, feel free to change it to better match what you're trying to do!
+    # These next lines defines a Docker executors: https://circleci.com/docs/2.0/executor-types/
+    # You can specify an image from Dockerhub or use one of the convenience images from CircleCI's Developer Hub
+    # A list of available CircleCI Docker convenience images are available here: https://circleci.com/developer/images/image/cimg/python
+    # The executor is the environment in which the steps below will be executed - below will use a python 3.9 container
+    # Change the version below to your required version of python
     docker:
-      - image: busybox
-    working_directory: /home/circleci/image-builder
-    steps:
-      - run: echo doing nothing.
-
-  ###########################
-  #### ubuntu-14.04-XXL #####
-  ###########################
-  ubuntu-14.04-XXL:
-    machine:
-      docker_layer_caching: true
-    working_directory: /home/circleci/image-builder
-    environment:
-      IMAGE_REPO: circleci/build-image
-      TARGET: ubuntu-14.04-XXL
-      _TARGET: ubuntu-14_04-XXL
+      - image: cimg/python:3.8
+    # Checkout the code as the first step. This is a dedicated CircleCI step.
+    # The python orb's install-packages step will install the dependencies from a Pipfile via Pipenv by default.
+    # Here we're making sure we use just use the system-wide pip. By default it uses the project root's requirements.txt.
+    # Then run your tests!
+    # CircleCI will report the results back to your VCS provider.
     steps:
       - checkout
-      - run: echo -n "$TARGET-$CIRCLE_BUILD_NUM-$(git rev-parse --short HEAD)" > _tag
-      - run: echo "Building $IMAGE_REPO:$(cat _tag)"
+      - python/install-packages:
+          pkg-manager: pip
+          # app-dir: ~/project/package-directory/  # If you're requirements.txt isn't in the root directory.
+          # pip-dependency-file: test-requirements.txt  # if you have a different name for your requirements file, maybe one that combines your runtime and test requirements.
       - run:
-          command: |
-            docker build \
-            $NO_CACHE \
-            --build-arg IMAGE_TAG=$(cat _tag) \
-            -t $IMAGE_REPO:$(cat _tag) \
-            -f targets/$TARGET/Dockerfile \
-            .
-
-      - run: docker rm --force $TARGET-test || true
-
-      - run:
-          command: |
-            docker run -d -v /home/circleci/image-builder/tests:/home/ubuntu/tests \
-                       -p 12345:22 --name $TARGET-test \
-                       $IMAGE_REPO:$(cat _tag)
-
-            sleep 20
-
-      - run: docker cp tests/insecure-ssh-key.pub $TARGET-test:/home/ubuntu/.ssh/authorized_keys
-
-      - run: docker exec -it $TARGET-test bash -c "chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys"
-
-      - run: chmod 600 tests/insecure-ssh-key;
-
-      - run: ssh -i tests/insecure-ssh-key -p 12345 ubuntu@localhost bats /home/ubuntu/tests/unit/$TARGET
-
-      - run: docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
-
-      - run: |
-           for i in 1 2 3; do
-             docker push $IMAGE_REPO:$(cat _tag)
-             if [ $? -eq 0 ]; then
-               exit 0
-             fi
-             echo "Retrying...."
-           done
-           exit 1
-
-      - run: docker run $IMAGE_REPO:$(cat _tag) sudo -H -i -u ubuntu /opt/circleci/bin/pkg-versions.sh | jq . > versions-$_TARGET.json
-
-      - run: curl -o versions.json.before https://circleci.com/docs/environments/$TARGET.json
-
-      - run: diff -uw versions.json.before versions-$_TARGET.json > versions-$_TARGET.diff || true
-
-      - store_artifacts:
-          path: versions-ubuntu-14_04-XXL.diff
-          destination: versions-ubuntu-14.04-XXL.diff
-
-      - store_artifacts:
-          path: versions-ubuntu-14_04-XXL.json
-          destination: versions-ubuntu-14.04-XXL.json
-
-      - deploy:
-          command: |
-            if [ "${CIRCLE_BRANCH}" == "master" ]; then
-              # Streaming to awscli because disk space is not enough in the machine VM
-              ./docker-export $IMAGE_REPO:$(cat _tag) | aws s3 cp - s3://circle-downloads/build-image-$(cat _tag).tar.gz --acl public-read
-              aws s3 cp s3://circle-downloads/build-image-$(cat _tag).tar.gz s3://lxc-images/build-image-$(cat _tag).tar.gz --acl public-read
-              aws s3 cp s3://circle-downloads/build-image-$(cat _tag).tar.gz s3://lxc-images-us-east-2/build-image-$(cat _tag).tar.gz --acl public-read --region us-east-2
-              aws s3 cp s3://circle-downloads/build-image-$(cat _tag).tar.gz s3://lxc-images-us-west-2/build-image-$(cat _tag).tar.gz --acl public-read --region us-west-2
-            fi
-
-  ###########################
-  #### ubuntu-14.04-XXL-upstart #####
-  ###########################
-  ubuntu-14.04-XXL-upstart:
-    machine:
-      docker_layer_caching: true
-    working_directory: /home/circleci/image-builder
-    environment:
-      IMAGE_REPO: circleci/build-image
-      TARGET: ubuntu-14.04-XXL-upstart
-      _TARGET: ubuntu-14_04-XXL-upstart
-    steps:
-      - checkout
-      - run: echo -n "$TARGET-$CIRCLE_BUILD_NUM-$(git rev-parse --short HEAD)" > _tag
-      - run: echo "Building $IMAGE_REPO:$(cat _tag)"
-      - run:
-          command: |
-            docker build \
-            $NO_CACHE \
-            --build-arg IMAGE_TAG=$(cat _tag) \
-            -t $IMAGE_REPO:$(cat _tag) \
-            -f targets/$TARGET/Dockerfile \
-            .
-
-      - run: docker rm --force $TARGET-test || true
-
-      - run:
-          command: |
-            docker run -d -v /home/circleci/image-builder/tests:/home/ubuntu/tests \
-                       -p 12345:22 --name $TARGET-test \
-                       $IMAGE_REPO:$(cat _tag)
-
-            sleep 10
-
-      - run: docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
-
-      - run: |
-           for i in 1 2 3; do
-             docker push $IMAGE_REPO:$(cat _tag)
-             if [ $? -eq 0 ]; then
-               exit 0
-             fi
-             echo "Retrying...."
-           done
-           exit 1
-
-  ##################################
-  #### ubuntu-14.04-enterprise #####
-  ##################################
-  ubuntu-14.04-enterprise:
-    machine:
-      docker_layer_caching: true
-    working_directory: /home/circleci/image-builder
-    environment:
-      IMAGE_REPO: circleci/build-image
-      TARGET: ubuntu-14.04-enterprise
-    steps:
-      - checkout
-      - run: echo -n "$TARGET-$CIRCLE_BUILD_NUM-$(git rev-parse --short HEAD)" > _tag
-      - run: echo "Building $IMAGE_REPO:$(cat _tag)"
-      - run:
-          command: |
-            docker build \
-            $NO_CACHE \
-            --build-arg IMAGE_TAG=$(cat _tag) \
-            -t $IMAGE_REPO:$(cat _tag) \
-            -f targets/$TARGET/Dockerfile \
-            .
-
-      - run: docker rm --force $TARGET-test || true
-
-      - run: docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
-
-      - run: |
-           for i in 1 2 3; do
-             docker push $IMAGE_REPO:$(cat _tag)
-             if [ $? -eq 0 ]; then
-               exit 0
-             fi
-             echo "Retrying...."
-           done
-           exit 1
-
-      - run: docker run $IMAGE_REPO:$(cat _tag) sudo -H -i -u ubuntu /opt/circleci/bin/pkg-versions.sh | jq . > versions-$TARGET.json
-
-      - run: curl -o versions.json.before https://circleci.com/docs/environments/$TARGET.json
-
-      - run: diff -uw versions.json.before versions-$TARGET.json > versions-$TARGET.diff || true
-
-      - store_artifacts:
-          path: versions-ubuntu-14.04-enterprise.diff
-          destination: versions-ubuntu-14.04-enterprise.diff
-
-      - store_artifacts:
-          path: versions-ubuntu-14.04-enterprise.json
-          destination: versions-ubuntu-14.04-enterprise.json
-
-  ######################################
-  #### ubuntu-14.04-XXL-enterprise #####
-  ######################################
-  ubuntu-14.04-XXL-enterprise:
-    machine:
-      docker_layer_caching: true
-    working_directory: /home/circleci/image-builder
-    environment:
-      IMAGE_REPO: circleci/build-image
-      TARGET: ubuntu-14.04-XXL-enterprise
-    steps:
-      - checkout
-      - run: echo -n "$TARGET-$CIRCLE_BUILD_NUM-$(git rev-parse --short HEAD)" > _tag
-      - run: echo "Building $IMAGE_REPO:$(cat _tag)"
-      - run:
-          command: |
-            docker build \
-            $NO_CACHE \
-            --build-arg IMAGE_TAG=$(cat _tag) \
-            -t $IMAGE_REPO:$(cat _tag) \
-            -f targets/$TARGET/Dockerfile \
-            .
-
-      - run: docker rm --force $TARGET-test || true
-
-      - run: docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
-
-      - run: |
-           for i in 1 2 3; do
-             docker push $IMAGE_REPO:$(cat _tag)
-             if [ $? -eq 0 ]; then
-               exit 0
-             fi
-             echo "Retrying...."
-           done
-           exit 1
-
-      - run: docker run $IMAGE_REPO:$(cat _tag) sudo -H -i -u ubuntu /opt/circleci/bin/pkg-versions.sh | jq . > versions-$TARGET.json
-
-      - run: curl -o versions.json.before https://circleci.com/docs/environments/$TARGET.json
-
-      - run: diff -uw versions.json.before versions-$TARGET.json > versions-$TARGET.diff || true
-
-      - store_artifacts:
-          path: versions-ubuntu-14.04-XXL-enterprise.diff
-          destination: versions-ubuntu-14.04-XXL-enterprise.diff
-
-      - store_artifacts:
-          path: versions-ubuntu-14.04-XXL-enterprise.json
-          destination: versions-ubuntu-14.04-XXL-enterprise.json
+          name: Run tests
+          # This assumes pytest is installed via the install-package step above
+          command: pytest
